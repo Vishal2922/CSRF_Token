@@ -73,9 +73,15 @@ class AuthController
                 $accessToken = JWT::generateAccessToken($payload);
                 $refreshToken = JWT::generateRefreshToken($payload);
 
+                // CSRF Token Generation & Storage in Session
+                if (session_status() === PHP_SESSION_NONE) {
+                    session_start();
+                }
+                $csrfToken = bin2hex(random_bytes(32));
+                $_SESSION['csrf_token'] = $csrfToken;
+
                 /**
-                 * UPDATED LOGIC: Hex-ai vida Hash innum secure.
-                 * Plain token-ai anuppuvom, Model athai hash panni store pannum.
+                 * EXISTING SECURITY: Hashed Refresh Token in DB.
                  */
                 if (!$user->updateRefreshToken($user->id, $refreshToken)) {
                     Response::json(500, "Error saving session.");
@@ -88,10 +94,10 @@ class AuthController
                     'samesite' => 'Strict'
                 ]);
 
-                // Final Response (Unga original format)
                 Response::json(200, [
                     "message" => "Login successful",
                     "access_token" => $accessToken,
+                    "csrf_token" => $csrfToken, // CSRF sent in JSON body
                     "access_token_expiry" => (int)$_ENV['JWT_ACCESS_EXPIRY'] . " seconds",
                     "refresh_token_validity" => "Session active for 1 day"
                 ]);
@@ -102,103 +108,100 @@ class AuthController
             Response::json(404, "User not found");
         }
     }
+    
 
-    /**
-     * 3. REFRESH: Manual 401 flow-kaana pudhu endpoint.
-     */
-    // app/controllers/AuthController.php
-
+    // 3. TOKEN REFRESH
     public function refresh()
-{
-    // 1. Header Extraction (Expired Access Token)
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? null;
-    $currentAccessToken = null;
+    {
+        // 1. Header Extraction (Expired Access Token)
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? null;
+        $currentAccessToken = null;
 
-    if ($authHeader && preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-        $currentAccessToken = $matches[1];
-    }
+        if ($authHeader && preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            $currentAccessToken = $matches[1];
+        }
 
-    // Access Token illai-naa block
-    if (!$currentAccessToken) {
-        Response::json(401, "Original Access Token is required.");
-        exit();
-    }
-
-    // Access Token innum valid-aa irundhaa refresh-ai block pannuvom
-    if (JWT::verify($currentAccessToken)) {
-        Response::json(403, "Access token is still valid. Manual refresh is forbidden.");
-        exit();
-    }
-
-    // 2. Cookie Extraction
-    $refreshToken = $_COOKIE['refresh_token'] ?? null;
-    if (!$refreshToken) {
-        Response::json(401, "Refresh token cookie is missing.");
-        exit();
-    }
-
-    /**
-     * IP ADDRESS VALIDATION: (RESTORED)
-     * Token-la ulla IP-um current device IP-um match aaganum.
-     */
-    $refreshData = JWT::verify($refreshToken);
-    if (!$refreshData || $refreshData['ip'] !== $_SERVER['REMOTE_ADDR']) {
-        Response::json(403, "Security Alert: Device or Network mismatch detected.");
-        exit();
-    }
-
-    // 3. Payload Extraction from Access Token (Source of Truth)
-    $tokenPayload = JWT::getPayload($currentAccessToken);
-    if (!$tokenPayload) {
-        Response::json(401, "Invalid access token structure.");
-        exit();
-    }
-
-    $userId = (int)$tokenPayload['user_id'];
-    $userModel = new User($this->db);
-
-    /**
-     * DB HASH VALIDATION:
-     * DB-la ulla Hashed Token-ai verify pannuvom.
-     */
-    $user = $userModel->validateRefreshToken($userId, $refreshToken);
-
-    if ($user) {
-        /**
-         * PAYLOAD SYNC VALIDATION: (RESTORED)
-         * Access Token-la ulla identity matum DB-la ulla record sync aaganum.
-         */
-        if ((int)$user['id'] !== (int)$tokenPayload['user_id'] || $user['email'] !== $tokenPayload['email']) {
-            Response::json(403, "Security Alert: Access token payload mismatch with database record.");
+        // Access Token illai-naa block
+        if (!$currentAccessToken) {
+            Response::json(401, "Original Access Token is required.");
             exit();
         }
 
-        // --- All Validations Passed ---
+        // Access Token innum valid-aa irundhaa refresh-ai block pannuvom
+        if (JWT::verify($currentAccessToken)) {
+            Response::json(403, "Access token is still valid. Manual refresh is forbidden.");
+            exit();
+        }
 
-        // 4. Regenerate New Pair (Token Rotation)
-        $newAccess = JWT::generateAccessToken(["user_id" => $user['id'], "email" => $user['email']]);
-        $newRefresh = JWT::generateRefreshToken(["user_id" => $user['id'], "email" => $user['email']]);
+        // 2. Cookie Extraction
+        $refreshToken = $_COOKIE['refresh_token'] ?? null;
+        if (!$refreshToken) {
+            Response::json(401, "Refresh token cookie is missing.");
+            exit();
+        }
 
-        // DB Update with new Hash
-        $userModel->updateRefreshToken($user['id'], $newRefresh);
+        /**
+         * IP ADDRESS VALIDATION: (RESTORED)
+         * Token-la ulla IP-um current device IP-um match aaganum.
+         */
+        $refreshData = JWT::verify($refreshToken);
+        if (!$refreshData || $refreshData['ip'] !== $_SERVER['REMOTE_ADDR']) {
+            Response::json(403, "Security Alert: Device or Network mismatch detected.");
+            exit();
+        }
 
-        setcookie('refresh_token', $newRefresh, [
-            'expires' => time() + (int)$_ENV['JWT_REFRESH_EXPIRY'],
-            'path' => '/',
-            'httponly' => true,
-            'samesite' => 'Strict'
-        ]);
+        // 3. Payload Extraction from Access Token (Source of Truth)
+        $tokenPayload = JWT::getPayload($currentAccessToken);
+        if (!$tokenPayload) {
+            Response::json(401, "Invalid access token structure.");
+            exit();
+        }
 
-        // 5. Send Response
-        Response::json(200, [
-            "access_token" => $newAccess,
-            "expires_in" => (int)$_ENV['JWT_ACCESS_EXPIRY']
-        ]);
-    } else {
-        Response::json(401, "Invalid session: Token mismatch or not found in DB.");
+        $userId = (int)$tokenPayload['user_id'];
+        $userModel = new User($this->db);
+
+        /**
+         * DB HASH VALIDATION:
+         * DB-la ulla Hashed Token-ai verify pannuvom.
+         */
+        $user = $userModel->validateRefreshToken($userId, $refreshToken);
+
+        if ($user) {
+            /**
+             * PAYLOAD SYNC VALIDATION: (RESTORED)
+             * Access Token-la ulla identity matum DB-la ulla record sync aaganum.
+             */
+            if ((int)$user['id'] !== (int)$tokenPayload['user_id'] || $user['email'] !== $tokenPayload['email']) {
+                Response::json(403, "Security Alert: Access token payload mismatch with database record.");
+                exit();
+            }
+
+            // --- All Validations Passed ---
+
+            // 4. Regenerate New Pair (Token Rotation)
+            $newAccess = JWT::generateAccessToken(["user_id" => $user['id'], "email" => $user['email']]);
+            $newRefresh = JWT::generateRefreshToken(["user_id" => $user['id'], "email" => $user['email']]);
+
+            // DB Update with new Hash
+            $userModel->updateRefreshToken($user['id'], $newRefresh);
+
+            setcookie('refresh_token', $newRefresh, [
+                'expires' => time() + (int)$_ENV['JWT_REFRESH_EXPIRY'],
+                'path' => '/',
+                'httponly' => true,
+                'samesite' => 'Strict'
+            ]);
+
+            // 5. Send Response
+            Response::json(200, [
+                "access_token" => $newAccess,
+                "expires_in" => (int)$_ENV['JWT_ACCESS_EXPIRY']
+            ]);
+        } else {
+            Response::json(401, "Invalid session: Token mismatch or not found in DB.");
+        }
     }
-}
     /**
      * 4. LOGOUT: User logic cleanup.
      */
