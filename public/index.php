@@ -55,8 +55,8 @@ $router->add('POST', '/api/token/refresh', 'AuthController', 'refresh');
 // --- Protected Patient Module with CSRF Guard ---
 
 // GET requests - CSRF thevai illai (Read-only)
-$router->add('GET', '/api/patients', 'PatientController', 'index', ['AuthMiddleware']); 
-$router->add('GET', '/api/patients/{id}', 'PatientController', 'show', ['AuthMiddleware']);
+$router->add('GET', '/api/patients', 'PatientController', 'index', ['AuthMiddleware', 'CsrfMiddleware']); 
+$router->add('GET', '/api/patients/{id}', 'PatientController', 'show', ['AuthMiddleware', 'CsrfMiddleware']);
 
 /**
  * State-changing requests - CSRF Guard Active

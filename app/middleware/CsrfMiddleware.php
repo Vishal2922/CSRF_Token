@@ -10,7 +10,7 @@ class CsrfMiddleware
     {
         // 1. Only validate state-changing methods (As per Roadmap)
         $method = $_SERVER['REQUEST_METHOD'];
-        $protectedMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
+        $protectedMethods = ['GET','POST', 'PUT', 'PATCH', 'DELETE'];
 
         if (in_array($method, $protectedMethods)) {
             
