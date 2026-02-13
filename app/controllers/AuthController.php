@@ -196,7 +196,7 @@ class AuthController
                 "expires_in" => (int)$_ENV['JWT_ACCESS_EXPIRY']
             ]);
         } else {
-            Response::json(401, "Invalid session: Token mismatch or not found in DB.");
+            Response::json(401, "Invalid session: session not found . please login again.");
         }
     }
     /**
