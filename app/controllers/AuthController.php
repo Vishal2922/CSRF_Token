@@ -48,9 +48,7 @@ class AuthController
         }
     }
 
-    /**
-     * 2. LOGIN: Ippo Hex-ukku badhilaa direct-aa HASH update pannuvom.
-     */
+    
     public function login()
     {
         $data = $_POST['body'] ?? json_decode(file_get_contents("php://input"), true);
@@ -77,7 +75,7 @@ class AuthController
                 if (session_status() === PHP_SESSION_NONE) {
                     session_start();
                 }
-                $csrfToken = bin2hex(random_bytes(32));
+                $csrfToken = bin2hex(random_bytes(32)); //64 chars string
                 $_SESSION['csrf_token'] = $csrfToken;
 
                 /**
@@ -162,15 +160,14 @@ class AuthController
         $userModel = new User($this->db);
 
         /**
-         * DB HASH VALIDATION:
-         * DB-la ulla Hashed Token-ai verify pannuvom.
+                                                 * DB HASH VALIDATION:
+         
          */
         $user = $userModel->validateRefreshToken($userId, $refreshToken);
 
         if ($user) {
             /**
              * PAYLOAD SYNC VALIDATION: (RESTORED)
-             * Access Token-la ulla identity matum DB-la ulla record sync aaganum.
              */
             if ((int)$user['id'] !== (int)$tokenPayload['user_id'] || $user['email'] !== $tokenPayload['email']) {
                 Response::json(403, "Security Alert: Access token payload mismatch with database record.");
